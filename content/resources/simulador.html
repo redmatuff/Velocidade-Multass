@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador TVM - Radar de Velocidade Média</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        #game-container {
+            width: 100%;
+            height: 300px;
+            background-color: #4ade80; /* Grass color */
+            position: relative;
+            overflow: hidden;
+            border-bottom: 8px solid #374151; /* Road border */
+        }
+
+        #road {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 120px;
+            background-color: #4b5563; /* Asphalt color */
+            display: flex;
+            align-items: center;
+        }
+
+        .lane-divider {
+            width: 100%;
+            height: 4px;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 20px,
+                #fff 20px,
+                #fff 40px
+            );
+        }
+
+        #car {
+            width: 80px;
+            height: 40px;
+            background-color: #ef4444; /* Red car */
+            border-radius: 10px;
+            position: absolute;
+            bottom: 20px;
+            left: 50px;
+            transition: left 0.1s linear;
+            z-index: 10;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        /* Car windows */
+        #car::before {
+            content: '';
+            position: absolute;
+            top: 5px;
+            left: 15px;
+            width: 20px;
+            height: 15px;
+            background-color: #93c5fd;
+            border-radius: 3px;
+        }
+        #car::after {
+            content: '';
+            position: absolute;
+            top: 5px;
+            right: 15px;
+            width: 20px;
+            height: 15px;
+            background-color: #93c5fd;
+            border-radius: 3px;
+        }
+
+
+        .radar {
+            position: absolute;
+            bottom: 120px; /* Above the road */
+            width: 20px;
+            height: 80px;
+            background-color: #9ca3af;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .radar::after {
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 20px; /* Camera points right */
+            width: 15px;
+            height: 15px;
+            background-color: #1f2937;
+            border-radius: 50%;
+            border: 2px solid #d1d5db;
+        }
+
+        .km-marker {
+            position: absolute;
+            bottom: 130px;
+            color: white;
+            background-color: #166534;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            transform: translateX(-50%);
+        }
+
+        #scrolling-content {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.1s linear;
+        }
+
+        /* Modal styling */
+        #modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 50;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            max-width: 800px; /* Aumentado para acomodar o gráfico */
+            width: 90%;
+            max-height: 95vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <header class="bg-blue-600 text-white p-4 shadow-md text-center">
+        <h1 class="text-2xl font-bold">O Teorema do Valor Médio em Ação</h1>
+        <p class="text-sm opacity-90">Simulador de Radar de Velocidade Média - Cálculo 1</p>
+    </header>
+
+    <main class="flex-grow p-4 md:p-8 max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Game Area (Takes up 2 columns on large screens) -->
+        <div class="lg:col-span-2 flex flex-col gap-4">
+            
+            <div class="bg-white rounded-lg shadow-md p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Simulador de Direção</h2>
+                    <div class="bg-gray-200 px-3 py-1 rounded text-sm font-mono">
+                        Limite da via: <span class="text-red-600 font-bold">100 km/h</span>
+                    </div>
+                </div>
+
+                <!-- The Game Viewport -->
+                <div id="game-container" class="rounded-md border border-gray-300">
+                    <div id="scrolling-content">
+                        <!-- Radars and Markers will be injected here via JS -->
+                    </div>
+                    <div id="road">
+                        <div class="lane-divider"></div>
+                    </div>
+                    <div id="car"></div>
+                </div>
+
+                <!-- Real-time Chart -->
+                <div class="mt-4 bg-gray-50 p-4 rounded-md border border-gray-300 shadow-inner w-full">
+                    <div class="flex flex-wrap justify-between items-center mb-2">
+                        <h3 class="text-sm font-semibold text-gray-700">Gráfico da Trajetória: Posição (Km) x Tempo (s)</h3>
+                        <div class="text-sm font-mono bg-blue-100 text-blue-800 px-3 py-1 rounded shadow-sm border border-blue-200">
+                            Cronômetro: <span id="live-timer" class="font-bold text-lg">0.0</span> s
+                        </div>
+                    </div>
+                    <div style="height: 220px; width: 100%;">
+                        <canvas id="tvmChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="mt-6 flex justify-center gap-4">
+                    <button id="btn-brake" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg active:translate-y-1 select-none touch-manipulation">
+                        FREAR (Seta Esquerda)
+                    </button>
+                    <button id="btn-accel" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg active:translate-y-1 select-none touch-manipulation">
+                        ACELERAR (Seta Direita)
+                    </button>
+                </div>
+                <p class="text-center text-sm text-gray-500 mt-2">Dica: Mantenha pressionado para acelerar ou frear.</p>
+            </div>
+        </div>
+
+        <!-- TVM Data Panel (HUD) -->
+        <div class="bg-white rounded-lg shadow-md p-6 flex flex-col h-full">
+            <h2 class="text-xl font-semibold mb-4 border-b pb-2">Painel de Dados do TVM</h2>
+            
+            <!-- Speedometer -->
+            <div class="flex flex-col items-center justify-center bg-gray-100 p-4 rounded-lg mb-6">
+                <span class="text-gray-500 text-sm mb-1">Velocidade Instantânea</span>
+                <div class="text-4xl font-mono font-bold" id="speed-display">0 <span class="text-xl text-gray-500">km/h</span></div>
+                
+                <!-- Visual Speed Bar -->
+                <div class="w-full h-2 bg-gray-300 rounded mt-3 overflow-hidden">
+                    <div id="speed-bar" class="h-full bg-blue-500 transition-all" style="width: 0%;"></div>
+                </div>
+                <div class="w-full flex justify-between text-xs text-gray-400 mt-1">
+                    <span>0</span>
+                    <span>80</span>
+                    <span>160</span>
+                </div>
+            </div>
+
+            <!-- Checkpoint Data -->
+            <h3 class="font-medium text-gray-700 mb-2">Registros dos Radares</h3>
+            <div class="space-y-4 flex-grow">
+                
+                <!-- Radar 1 Data -->
+                <div class="border rounded p-3 bg-gray-50 relative" id="data-radar1">
+                    <div class="absolute -left-2 -top-2 bg-blue-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">A</div>
+                    <div class="flex justify-between items-center mb-1 ml-2">
+                        <span class="font-semibold text-sm">Radar 1</span>
+                        <span class="text-xs bg-gray-200 px-2 rounded">Posição: Km 10.0</span>
+                    </div>
+                    <div class="ml-2 mt-2 font-mono text-sm">
+                        Tempo (<span class="italic">t₁</span>): <span id="time-1" class="font-bold text-gray-400">--</span> s
+                    </div>
+                </div>
+
+                <!-- Radar 2 Data -->
+                <div class="border rounded p-3 bg-gray-50 relative" id="data-radar2">
+                    <div class="absolute -left-2 -top-2 bg-blue-600 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">B</div>
+                    <div class="flex justify-between items-center mb-1 ml-2">
+                        <span class="font-semibold text-sm">Radar 2</span>
+                        <span class="text-xs bg-gray-200 px-2 rounded">Posição: Km 12.5</span>
+                    </div>
+                    <div class="ml-2 mt-2 font-mono text-sm">
+                        Tempo (<span class="italic">t₂</span>): <span id="time-2" class="font-bold text-gray-400">--</span> s
+                    </div>
+                </div>
+            </div>
+
+            <button id="btn-restart" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-colors hidden">
+                Reiniciar Simulação
+            </button>
+        </div>
+    </main>
+
+    <!-- TVM Result Modal -->
+    <div id="modal-overlay" class="flex">
+        <div id="modal-content" class="text-center relative">
+            
+            <div id="modal-icon" class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-4">
+                <!-- Icon inserted via JS -->
+            </div>
+            
+            <h2 id="modal-title" class="text-3xl font-bold text-gray-900 mb-2">Resultado</h2>
+            
+            <div class="bg-gray-100 p-4 rounded-lg my-4 font-mono text-left inline-block">
+                <p>Δs = Posição B - Posição A = <span class="font-bold">2.5 km</span></p>
+                <p>Δt = t₂ - t₁ = <span id="modal-dt" class="font-bold">--</span> s = <span id="modal-dt-h" class="font-bold">--</span> h</p>
+                <div class="border-t border-gray-300 my-2"></div>
+                <p>V_{média} = Δs / Δt = <span id="modal-vmedia" class="font-bold text-xl text-blue-600">--</span> km/h</p>
+            </div>
+
+            <div id="modal-explanation" class="text-gray-600 text-sm mb-6 leading-relaxed text-justify px-4">
+                <!-- Explanation inserted via JS -->
+            </div>
+
+            <button id="btn-close-modal" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-6 rounded">
+                Entendi
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Constants & Logic ---
+        const MAX_SPEED_KMH = 160;
+        const SPEED_LIMIT_KMH = 100;
+        
+        // Scale: 1 km = 3000 pixels on screen for smoother long scrolling
+        const PIXELS_PER_KM = 3000; 
+        
+        const START_KM = 9.8; 
+        const RADAR_1_KM = 10.0;
+        const RADAR_2_KM = 12.5;
+        
+        // Multiplicador de tempo: o jogo roda 10x mais rápido que a vida real.
+        // Assim, uma viagem de 112 segundos no jogo leva ~11 segundos na vida real.
+        const SIMULATION_SPEED = 10; 
+
+        // Acceleration factors (Valores ajustados para simular a inércia de um carro real)
+        const ACCEL_RATE = 4.0; // km/h por segundo de jogo
+        const BRAKE_RATE = 12.0; // km/h por segundo de jogo
+        const FRICTION = 0.5;   // km/h por segundo de jogo (desaceleração natural)
+
+        // --- State Variables ---
+        let currentSpeedKmh = 0;
+        let currentPositionKm = START_KM;
+        let gameActive = false;
+        let isAccelerating = false;
+        let isBraking = false;
+        let animationFrameId = null;
+        
+        // Timing (Usando delta time para precisão física perfeita)
+        let lastRealTime = 0;
+        let gameTime = 0; 
+        let timeAtRadar1 = null; 
+        let timeAtRadar2 = null;
+
+        // Gráfico
+        let trajectoryData = [];
+        let chartInstance = null;
+
+        // --- DOM Elements ---
+        const carEl = document.getElementById('car');
+        const scrollContentEl = document.getElementById('scrolling-content');
+        const speedDisplayEl = document.getElementById('speed-display');
+        const speedBarEl = document.getElementById('speed-bar');
+        const liveTimerEl = document.getElementById('live-timer');
+        
+        const time1El = document.getElementById('time-1');
+        const time2El = document.getElementById('time-2');
+        const radar1Box = document.getElementById('data-radar1');
+        const radar2Box = document.getElementById('data-radar2');
+        
+        const btnAccel = document.getElementById('btn-accel');
+        const btnBrake = document.getElementById('btn-brake');
+        const btnRestart = document.getElementById('btn-restart');
+        
+        const modalOverlay = document.getElementById('modal-overlay');
+        const btnCloseModal = document.getElementById('btn-close-modal');
+
+        function setupTrack() {
+            scrollContentEl.innerHTML = ''; 
+
+            function createTrackElement(km, type) {
+                const el = document.createElement('div');
+                const positionPx = (km - START_KM) * PIXELS_PER_KM;
+                
+                if (type === 'radar') {
+                    el.className = 'radar';
+                    el.style.left = `${positionPx}px`;
+                    const flash = document.createElement('div');
+                    flash.className = 'absolute top-2 left-6 w-4 h-4 rounded-full bg-white opacity-0 transition-opacity duration-100 z-50';
+                    flash.id = `flash-${km}`;
+                    el.appendChild(flash);
+                } else if (type === 'marker') {
+                    el.className = 'km-marker';
+                    el.style.left = `${positionPx}px`;
+                    el.innerText = `Km ${km.toFixed(1)}`;
+                }
+                scrollContentEl.appendChild(el);
+            }
+
+            for (let km = 9.5; km <= 13.5; km += 0.5) {
+                createTrackElement(km, 'marker');
+            }
+
+            createTrackElement(RADAR_1_KM, 'radar');
+            createTrackElement(RADAR_2_KM, 'radar');
+            
+            carEl.style.left = '50px';
+            scrollContentEl.style.transform = `translateX(0px)`;
+        }
+
+        function updatePhysics(timestamp) {
+            if (!gameActive) return;
+
+            // Inicializa o relógio real no primeiro frame
+            if (!lastRealTime) lastRealTime = timestamp;
+            
+            const realDt = (timestamp - lastRealTime) / 1000; // Segundos reais desde o último frame
+            lastRealTime = timestamp;
+
+            // Previne saltos de física caso o usuário troque de aba (limite de 0.1s reais por frame)
+            if (realDt > 0.1) {
+                animationFrameId = requestAnimationFrame(updatePhysics);
+                return;
+            }
+
+            // O tempo do jogo avança baseado no fator de simulação
+            const dt = realDt * SIMULATION_SPEED; 
+            gameTime += dt;
+
+            // 1. Atualizar Velocidade (Aceleração gradual com Delta Time)
+            if (isAccelerating) {
+                currentSpeedKmh += ACCEL_RATE * dt;
+            } else if (isBraking) {
+                currentSpeedKmh -= BRAKE_RATE * dt;
+            } else {
+                currentSpeedKmh -= FRICTION * dt; 
+            }
+
+            // Limitar velocidade
+            if (currentSpeedKmh > MAX_SPEED_KMH) currentSpeedKmh = MAX_SPEED_KMH;
+            if (currentSpeedKmh < 0) currentSpeedKmh = 0;
+
+            // 2. Atualizar Posição
+            const speedKms = currentSpeedKmh / 3600; // Km por segundo
+            const previousPosition = currentPositionKm;
+            currentPositionKm += speedKms * dt;
+
+            // 3. Registrar dados para o Gráfico (após passar o Radar 1)
+            if (timeAtRadar1 !== null && currentPositionKm <= RADAR_2_KM + 0.05) {
+                trajectoryData.push({
+                    x: gameTime - timeAtRadar1,
+                    y: currentPositionKm
+                });
+                
+                // Atualiza o gráfico em tempo real para o aluno
+                if (chartInstance) chartInstance.update();
+            }
+
+            // 4. Checar Radares
+            checkRadarCrossing(previousPosition, currentPositionKm);
+
+            // 5. Atualizar UI
+            updateUI();
+
+            // 6. Verificar Fim de Jogo
+            if (currentPositionKm >= RADAR_2_KM + 0.02 && gameActive) {
+                endGame();
+            } else {
+                animationFrameId = requestAnimationFrame(updatePhysics);
+            }
+        }
+
+        function checkRadarCrossing(prevKm, currKm) {
+            // Radar 1
+            if (prevKm < RADAR_1_KM && currKm >= RADAR_1_KM) {
+                timeAtRadar1 = gameTime;
+                trajectoryData.push({ x: 0, y: RADAR_1_KM }); // Ponto inicial no gráfico
+                
+                time1El.innerText = (0.0).toFixed(1);
+                time1El.classList.remove('text-gray-400');
+                time1El.classList.add('text-black');
+                radar1Box.classList.add('border-blue-500', 'bg-blue-50');
+                
+                flashRadar(RADAR_1_KM);
+            }
+
+            // Radar 2
+            if (prevKm < RADAR_2_KM && currKm >= RADAR_2_KM) {
+                if (timeAtRadar1 !== null) {
+                    timeAtRadar2 = gameTime;
+                    
+                    const elapsed = timeAtRadar2 - timeAtRadar1;
+                    time2El.innerText = elapsed.toFixed(1);
+                    time2El.classList.remove('text-gray-400');
+                    time2El.classList.add('text-black');
+                    radar2Box.classList.add('border-blue-500', 'bg-blue-50');
+                    
+                    flashRadar(RADAR_2_KM);
+                }
+            }
+        }
+
+        function flashRadar(km) {
+            const flashEl = document.getElementById(`flash-${km}`);
+            if (flashEl) {
+                flashEl.style.opacity = '1';
+                flashEl.style.boxShadow = '0 0 20px 10px rgba(255,255,255,0.8)';
+                setTimeout(() => {
+                    flashEl.style.opacity = '0';
+                    flashEl.style.boxShadow = 'none';
+                }, 150);
+            }
+        }
+
+        function updateUI() {
+            speedDisplayEl.innerHTML = `${Math.round(currentSpeedKmh)} <span class="text-xl text-gray-500">km/h</span>`;
+            
+            const speedPercent = (currentSpeedKmh / MAX_SPEED_KMH) * 100;
+            speedBarEl.style.width = `${speedPercent}%`;
+            
+            if (currentSpeedKmh > SPEED_LIMIT_KMH) {
+                speedBarEl.className = 'h-full transition-all bg-red-500';
+            } else {
+                speedBarEl.className = 'h-full transition-all bg-green-500';
+            }
+
+            const distanceMovedPx = (currentPositionKm - START_KM) * PIXELS_PER_KM;
+            scrollContentEl.style.transform = `translateX(-${distanceMovedPx}px)`;
+
+            // Atualiza o cronômetro visual em tempo real após o radar 1
+            if (timeAtRadar1 !== null && gameActive) {
+                const currentDt = gameTime - timeAtRadar1;
+                liveTimerEl.innerText = currentDt.toFixed(1);
+            } else if (timeAtRadar1 === null) {
+                liveTimerEl.innerText = "0.0";
+            }
+        }
+
+        function initLiveChart() {
+            const ctx = document.getElementById('tvmChart').getContext('2d');
+            
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            // Calcula o tempo que se leva para percorrer o trecho no limite da via
+            const TIME_LIMIT_SEC = (RADAR_2_KM - RADAR_1_KM) / (SPEED_LIMIT_KMH / 3600); 
+
+            chartInstance = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Sua Trajetória',
+                            data: trajectoryData,
+                            borderColor: '#2563eb', // Azul
+                            borderWidth: 3,
+                            showLine: true,
+                            tension: 0.1,
+                            pointRadius: 0
+                        },
+                        {
+                            label: `Limite ideal (${SPEED_LIMIT_KMH} km/h)`,
+                            data: [
+                                { x: 0, y: RADAR_1_KM },
+                                { x: TIME_LIMIT_SEC, y: RADAR_2_KM }
+                            ],
+                            borderColor: '#22c55e', // Verde
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            showLine: true,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#22c55e'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false, // Desligado para fluidez do tempo real
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Tempo cronometrado (s)', font: {weight: 'bold'} },
+                            min: 0,
+                            max: 120 // 120 segundos para dar folga além do limite
+                        },
+                        y: {
+                            title: { display: true, text: 'Posição (Km)', font: {weight: 'bold'} },
+                            min: RADAR_1_KM,
+                            max: RADAR_2_KM
+                        }
+                    },
+                    plugins: {
+                        tooltip: { enabled: false }
+                    }
+                }
+            });
+        }
+
+        function endGame() {
+            gameActive = false;
+            cancelAnimationFrame(animationFrameId);
+            currentSpeedKmh = 0;
+            updateUI(); 
+            
+            btnRestart.classList.remove('hidden');
+
+            if (timeAtRadar1 !== null && timeAtRadar2 !== null) {
+                const distanceKm = RADAR_2_KM - RADAR_1_KM; // 2.5
+                const dtSeconds = timeAtRadar2 - timeAtRadar1;
+                const dtHours = dtSeconds / 3600;
+                
+                // Cálculo Matemático exato da Velocidade Média
+                const avgSpeedKmh = distanceKm / dtHours;
+                
+                // Desenha a reta secante real do aluno no gráfico ao fim
+                chartInstance.data.datasets.push({
+                    label: 'Sua Vel. Média (TVM)',
+                    data: [
+                        { x: 0, y: RADAR_1_KM },
+                        { x: dtSeconds, y: RADAR_2_KM }
+                    ],
+                    borderColor: '#dc2626', // Vermelho
+                    borderWidth: 2,
+                    borderDash: [3, 3],
+                    showLine: true,
+                    pointRadius: 5,
+                    pointBackgroundColor: '#dc2626'
+                });
+                chartInstance.update();
+
+                showDiagnosticModal(distanceKm, dtSeconds, dtHours, avgSpeedKmh);
+            }
+        }
+
+        function showDiagnosticModal(ds, dtSec, dtHr, vMedia) {
+            document.getElementById('modal-dt').innerText = dtSec.toFixed(1);
+            document.getElementById('modal-dt-h').innerText = dtHr.toFixed(4);
+            document.getElementById('modal-vmedia').innerText = vMedia.toFixed(1);
+
+            const titleEl = document.getElementById('modal-title');
+            const iconEl = document.getElementById('modal-icon');
+            const expEl = document.getElementById('modal-explanation');
+
+            if (vMedia > SPEED_LIMIT_KMH) {
+                titleEl.innerText = "MULTADO!";
+                titleEl.className = "text-3xl font-bold text-red-600 mb-2";
+                iconEl.className = "mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-4";
+                iconEl.innerHTML = `<svg class="h-10 w-10 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`;
+                
+                expEl.innerHTML = `Sua velocidade média foi de <strong>${vMedia.toFixed(1)} km/h</strong>.<br><br>
+                Observe o gráfico em tempo real na tela principal. A linha azul é a sua trajetória <em>s(t)</em> e a linha tracejada vermelha é a reta secante conectando os radares.<br><br>
+                Pelo <strong>Teorema do Valor Médio</strong>, como a sua curva é contínua e sem quinas (derivável), é geometricamente garantido que <strong>existe pelo menos um instante</strong> na linha azul onde a inclinação dela (reta tangente / velocidade instantânea) é exatamente paralela à linha vermelha (${vMedia.toFixed(1)} km/h). A infração é matematicamente inquestionável!`;
+            
+            } else {
+                titleEl.innerText = "LIVRE DA MULTA";
+                titleEl.className = "text-3xl font-bold text-green-600 mb-2";
+                iconEl.className = "mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4";
+                iconEl.innerHTML = `<svg class="h-10 w-10 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+                
+                expEl.innerHTML = `Sua velocidade média foi de <strong>${vMedia.toFixed(1)} km/h</strong>.<br><br>
+                Observe no gráfico a reta secante (vermelha) cruzando sua trajetória (azul).<br><br>
+                <strong>Sutileza Matemática:</strong> Como sua média foi abaixo do limite, você não foi multado. Contudo, se você tiver acelerado muito e depois freado, notará que a sua curva azul sofre fortes oscilações. O TVM garante que você esteve a ${vMedia.toFixed(1)} km/h, mas ele <em>não nega</em> que em picos de inclinação (derivada alta) você possa ter ultrapassado os ${SPEED_LIMIT_KMH} km/h isoladamente. Sorte sua não haver um radar pontual ali!`;
+            }
+
+            modalOverlay.style.display = 'flex';
+        }
+
+        function initGame() {
+            currentSpeedKmh = 0;
+            currentPositionKm = START_KM;
+            gameActive = true;
+            
+            lastRealTime = 0;
+            gameTime = 0;
+            timeAtRadar1 = null;
+            timeAtRadar2 = null;
+            trajectoryData = [];
+            
+            time1El.innerText = '--';
+            time2El.innerText = '--';
+            time1El.className = 'font-bold text-gray-400';
+            time2El.className = 'font-bold text-gray-400';
+            radar1Box.className = 'border rounded p-3 bg-gray-50 relative';
+            radar2Box.className = 'border rounded p-3 bg-gray-50 relative';
+            liveTimerEl.innerText = "0.0";
+            
+            btnRestart.classList.add('hidden');
+            modalOverlay.style.display = 'none';
+
+            setupTrack();
+            updateUI();
+            initLiveChart(); // Inicializa o gráfico em branco para ser preenchido
+            
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            animationFrameId = requestAnimationFrame(updatePhysics);
+        }
+
+        // Input handling
+        function handleAccelStart(e) { if(e.cancelable) e.preventDefault(); isAccelerating = true; }
+        function handleAccelEnd(e) { if(e.cancelable) e.preventDefault(); isAccelerating = false; }
+        function handleBrakeStart(e) { if(e.cancelable) e.preventDefault(); isBraking = true; }
+        function handleBrakeEnd(e) { if(e.cancelable) e.preventDefault(); isBraking = false; }
+
+        btnAccel.addEventListener('mousedown', handleAccelStart);
+        btnAccel.addEventListener('mouseup', handleAccelEnd);
+        btnAccel.addEventListener('mouseleave', handleAccelEnd);
+        btnAccel.addEventListener('touchstart', handleAccelStart, {passive: false});
+        btnAccel.addEventListener('touchend', handleAccelEnd, {passive: false});
+
+        btnBrake.addEventListener('mousedown', handleBrakeStart);
+        btnBrake.addEventListener('mouseup', handleBrakeEnd);
+        btnBrake.addEventListener('mouseleave', handleBrakeEnd);
+        btnBrake.addEventListener('touchstart', handleBrakeStart, {passive: false});
+        btnBrake.addEventListener('touchend', handleBrakeEnd, {passive: false});
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight') isAccelerating = true;
+            if (e.key === 'ArrowLeft') isBraking = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowRight') isAccelerating = false;
+            if (e.key === 'ArrowLeft') isBraking = false;
+        });
+
+        btnCloseModal.addEventListener('click', () => {
+            modalOverlay.style.display = 'none';
+        });
+        btnRestart.addEventListener('click', initGame);
+
+        window.onload = () => {
+            initGame();
+        };
+    </script>
+</body>
+</html>
